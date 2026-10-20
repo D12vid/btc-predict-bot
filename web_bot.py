@@ -13,7 +13,6 @@ class ScalpingWebEngine:
         self.symbol = 'BTC/USDT'
         self.timeframe = '5m'
         
-        # Parámetros de simulación financiera ($1 por entrada y pago neto de 0.88 por victoria)
         self.monto_apuesta = 1.0
         self.pago_neto = 0.88 
         
@@ -24,7 +23,7 @@ class ScalpingWebEngine:
         self.prediccion_5m = {
             "accion": "ESPERANDO...",
             "color": "gray",
-            "razon": "Calculando filtros de precisión...",
+            "razon": "Conectando con Binance en la nube...",
             "confianza": "50%",
             "precio_apertura": 0.0,
             "dif_actual": 0.0,
@@ -33,14 +32,14 @@ class ScalpingWebEngine:
         }
 
         self.s_estricta = {
-            "titulo": "Análisis Estricto: Esperando Rechazo Confirmado",
-            "desc": "Filtra entradas contra tendencia hasta ver agotamiento real en las mechas.",
+            "titulo": "Análisis Estricto: Esperando Datos",
+            "desc": "Estableciendo conexión con el servidor...",
             "confianza": "Filtro Activo",
             "color": "gray"
         }
         self.s_dinamica = {
-            "titulo": "⚡ Filtro de Volatilidad y PnL ($1.00 USD / trade)",
-            "desc": "Calculando esperanza matemática...",
+            "titulo": "⚡ Filtro de Volatilidad y PnL",
+            "desc": "Esperando primer ciclo de velas...",
             "riesgo": "PnL: $0.00",
             "color": "gray"
         }
@@ -57,7 +56,6 @@ class ScalpingWebEngine:
         self.backtest_completado = False
 
     def calcular_indicadores(self, df):
-        # 1. RSI (14) Suavizado de Wilder
         delta = df['close'].diff()
         gain = delta.clip(lower=0)
         loss = -1 * delta.clip(upper=0)
@@ -66,7 +64,6 @@ class ScalpingWebEngine:
         rs = avg_gain / avg_loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        # 2. EMAs y Bandas de Bollinger
         df['EMA_9'] = df['close'].ewm(span=9, adjust=False).mean()
         df['EMA_21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['sma'] = df['close'].rolling(20).mean()
@@ -74,17 +71,12 @@ class ScalpingWebEngine:
         df['upper'] = df['sma'] + (df['std'] * 2)
         df['lower'] = df['sma'] - (df['std'] * 2)
         
-        # 3. Tamaño de cuerpo y mechas para detectar rechazo real
         df['body'] = (df['close'] - df['open']).abs()
         df['upper_wick'] = df['high'] - df[['open', 'close']].max(axis=1)
         df['lower_wick'] = df[['open', 'close']].min(axis=1) - df['low']
         return df
 
     def evaluar_vela_predict(self, previa, antepenultima):
-        """
-        Evalúa con filtros anti-tendencia y devuelve:
-        (direccion: UP/DOWN/SKIP, razon, confianza, es_estricto)
-        """
         rsi = float(previa['RSI'])
         rsi_ant = float(antepenultima['RSI'])
         ema9 = float(previa['EMA_9'])
@@ -97,28 +89,23 @@ class ScalpingWebEngine:
         mecha_inf = float(previa['lower_wick'])
         cuerpo = float(previa['body'])
 
-        # 1. SEÑAL ESTRICTA (Reversión CONFIRMADA: Extremo + Pérdida de impulso/Mecha)
-        # Evita vender cuando el precio sigue subiendo con fuerza sin dejar mecha
         if (rsi >= 68 or cierre >= upper) and (cierre < apertura or mecha_sup > cuerpo * 0.8 or rsi < rsi_ant):
-            return "DOWN", f"Rechazo bajista confirmado en techo (RSI {rsi:.1f} girando a la baja).", "90%", True
+            return "DOWN", f"Rechazo bajista confirmado en techo (RSI {rsi:.1f}).", "90%", True
         
         if (rsi <= 32 or cierre <= lower) and (cierre > apertura or mecha_inf > cuerpo * 0.8 or rsi > rsi_ant):
-            return "UP", f"Rebote alcista confirmado en piso (RSI {rsi:.1f} girando al alza).", "90%", True
+            return "UP", f"Rebote alcista confirmado en piso (RSI {rsi:.1f}).", "90%", True
 
-        # 2. FILTRO DE ZONA MUERTA (Evita perder dólares en ruido lateral)
         rango_bandas = upper - lower
         if (44 <= rsi <= 56 and cuerpo < 15) or rango_bandas < 60:
-            return "SKIP", f"Mercado sin fuerza o indeciso (RSI {rsi:.1f}, Cuerpo ${cuerpo:.0f}). Mejor no arriesgar $1.", "Neutral", False
+            return "SKIP", f"Mercado lateral (RSI {rsi:.1f}). Protegiendo capital.", "Neutral", False
 
-        # 3. CONTINUACIÓN DE MOMENTO (A favor del flujo real, no en contra)
         if ema9 > ema21 and cierre > apertura and 52 < rsi < 68:
-            return "UP", f"Impulso alcista limpio (Vela verde + EMA9 > EMA21, RSI {rsi:.1f}).", "78%", False
+            return "UP", f"Impulso alcista limpio (RSI {rsi:.1f}).", "78%", False
         
         if ema9 < ema21 and cierre < apertura and 32 < rsi < 48:
-            return "DOWN", f"Impulso bajista limpio (Vela roja + EMA9 < EMA21, RSI {rsi:.1f}).", "78%", False
+            return "DOWN", f"Impulso bajista limpio (RSI {rsi:.1f}).", "78%", False
 
-        # Si el RSI está muy alto (>68) pero la vela sigue siendo un bloque verde sin mecha, NO vamos en contra
-        return "SKIP", f"Condición mixta (RSI {rsi:.1f} sin confirmación clara). Protegiendo capital.", "Neutral", False
+        return "SKIP", f"Condición mixta (RSI {rsi:.1f}).", "Neutral", False
 
     def cargar_backtest_inicial(self, df):
         for i in range(22, len(df) - 1):
@@ -128,7 +115,7 @@ class ScalpingWebEngine:
             
             dir_pred, razon, conf, es_estricto = self.evaluar_vela_predict(vela_prev, vela_ante)
             if dir_pred == "SKIP":
-                continue # No apostamos en velas dudosas
+                continue
 
             apertura = float(vela_eval['open'])
             cierre = float(vela_eval['close'])
@@ -159,113 +146,114 @@ class ScalpingWebEngine:
         self.backtest_completado = True
 
     def actualizar_datos(self):
-        velas = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=75)
-        df = pd.DataFrame(velas, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
-        df = self.calcular_indicadores(df)
-        
-        if not self.backtest_completado:
-            self.cargar_backtest_inicial(df)
-
-        actual = df.iloc[-1]
-        previa = df.iloc[-2]
-        antepenultima = df.iloc[-3]
-
-        self.precio = float(actual['close'])
-        apertura_actual = float(actual['open'])
-        self.rsi = round(float(actual['RSI']), 1) if not pd.isna(actual['RSI']) else 50.0
-
-        ts_actual = int(actual['ts'])
-        if self.vela_actual_ts is not None and ts_actual != self.vela_actual_ts:
-            ap_cerrada = float(previa['open'])
-            ci_cerrada = float(previa['close'])
-            hora_cerrada = datetime.fromtimestamp(int(previa['ts']) / 1000).strftime('%H:%M')
+        try:
+            print("Descargando velas de Binance...")
+            velas = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=75)
+            df = pd.DataFrame(velas, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+            df = self.calcular_indicadores(df)
             
-            if self.prediccion_vela_actual and self.prediccion_vela_actual["dir"] in ["UP", "DOWN"]:
-                dir_ant = self.prediccion_vela_actual["dir"]
-                gano = (dir_ant == "UP" and ci_cerrada > ap_cerrada) or (dir_ant == "DOWN" and ci_cerrada < ap_cerrada)
-                etiqueta = "🟢 COMPRAR UP" if dir_ant == "UP" else "🔴 COMPRAR DOWN"
-                res_str = "✅ WIN" if gano else "❌ LOSS"
+            if not self.backtest_completado:
+                self.cargar_backtest_inicial(df)
 
-                if gano: self.w_din += 1
-                else: self.l_din += 1
-                self.hist_dinamico.insert(0, {
-                    "hora": hora_cerrada, "tipo": etiqueta,
-                    "entrada": f"${ap_cerrada:,.2f}", "extremo": f"Cierre: ${ci_cerrada:,.2f}", "res": res_str
-                })
-                self.hist_dinamico = self.hist_dinamico[:10]
+            actual = df.iloc[-1]
+            previa = df.iloc[-2]
+            antepenultima = df.iloc[-3]
 
-                if self.prediccion_vela_actual.get("estricto"):
-                    if gano: self.w_est += 1
-                    else: self.l_est += 1
-                    self.hist_estricto.insert(0, {
+            self.precio = float(actual['close'])
+            apertura_actual = float(actual['open'])
+            self.rsi = round(float(actual['RSI']), 1) if not pd.isna(actual['RSI']) else 50.0
+
+            ts_actual = int(actual['ts'])
+            if self.vela_actual_ts is not None and ts_actual != self.vela_actual_ts:
+                ap_cerrada = float(previa['open'])
+                ci_cerrada = float(previa['close'])
+                hora_cerrada = datetime.fromtimestamp(int(previa['ts']) / 1000).strftime('%H:%M')
+                
+                if self.prediccion_vela_actual and self.prediccion_vela_actual["dir"] in ["UP", "DOWN"]:
+                    dir_ant = self.prediccion_vela_actual["dir"]
+                    gano = (dir_ant == "UP" and ci_cerrada > ap_cerrada) or (dir_ant == "DOWN" and ci_cerrada < ap_cerrada)
+                    etiqueta = "🟢 COMPRAR UP" if dir_ant == "UP" else "🔴 COMPRAR DOWN"
+                    res_str = "✅ WIN" if gano else "❌ LOSS"
+
+                    if gano: self.w_din += 1
+                    else: self.l_din += 1
+                    self.hist_dinamico.insert(0, {
                         "hora": hora_cerrada, "tipo": etiqueta,
-                        "entrada": f"${ap_cerrada:,.2f}", "extremo": f"RSI {self.prediccion_vela_actual['rsi']:.1f}", "res": res_str
+                        "entrada": f"${ap_cerrada:,.2f}", "extremo": f"Cierre: ${ci_cerrada:,.2f}", "res": res_str
                     })
-                    self.hist_estricto = self.hist_estricto[:10]
+                    self.hist_dinamico = self.hist_dinamico[:10]
 
-        self.vela_actual_ts = ts_actual
+                    if self.prediccion_vela_actual.get("estricto"):
+                        if gano: self.w_est += 1
+                        else: self.l_est += 1
+                        self.hist_estricto.insert(0, {
+                            "hora": hora_cerrada, "tipo": etiqueta,
+                            "entrada": f"${ap_cerrada:,.2f}", "extremo": f"RSI {self.prediccion_vela_actual['rsi']:.1f}", "res": res_str
+                        })
+                        self.hist_estricto = self.hist_estricto[:10]
 
-        dir_actual, razon_actual, conf_actual, es_estricto_actual = self.evaluar_vela_predict(previa, antepenultima)
-        self.prediccion_vela_actual = {
-            "hora": datetime.fromtimestamp(ts_actual / 1000).strftime('%H:%M'),
-            "dir": dir_actual,
-            "tipo": "🟢 COMPRAR UP" if dir_actual == "UP" else ("🔴 COMPRAR DOWN" if dir_actual == "DOWN" else "⚪ NO OPERAR"),
-            "entrada": apertura_actual,
-            "rsi": float(previa['RSI']),
-            "estricto": es_estricto_actual
-        }
+            self.vela_actual_ts = ts_actual
 
-        dif = self.precio - apertura_actual
-        if dir_actual == "SKIP":
-            accion_txt = "⚪ NO APOSTAR EN ESTA VELA (ESPERAR)"
-            color_hero = "gray"
-            estado_txt = "🛡️ PROTEGIENDO TU $1.00 USD"
-        else:
-            accion_txt = "🟢 COMPRAR UP (SUBE)" if dir_actual == "UP" else "🔴 COMPRAR DOWN (BAJA)"
-            color_hero = "up" if dir_actual == "UP" else "down"
-            ganando_ahora = (dir_actual == "UP" and dif > 0) or (dir_actual == "DOWN" and dif < 0)
-            estado_txt = "🔥 GANANDO EN VIVO" if ganando_ahora else "⏳ EN DESARROLLO"
+            dir_actual, razon_actual, conf_actual, es_estricto_actual = self.evaluar_vela_predict(previa, antepenultima)
+            self.prediccion_vela_actual = {
+                "hora": datetime.fromtimestamp(ts_actual / 1000).strftime('%H:%M'),
+                "dir": dir_actual,
+                "tipo": "🟢 COMPRAR UP" if dir_actual == "UP" else ("🔴 COMPRAR DOWN" if dir_actual == "DOWN" else "⚪ NO OPERAR"),
+                "entrada": apertura_actual,
+                "rsi": float(previa['RSI']),
+                "estricto": es_estricto_actual
+            }
 
-        self.prediccion_5m = {
-            "accion": accion_txt,
-            "color": color_hero,
-            "razon": razon_actual,
-            "confianza": conf_actual,
-            "precio_apertura": apertura_actual,
-            "dif_actual": dif,
-            "estado_actual": estado_txt,
-            "id_vela": ts_actual if dir_actual != "SKIP" else 0
-        }
+            dif = self.precio - apertura_actual
+            if dir_actual == "SKIP":
+                accion_txt = "⚪ NO APOSTAR (ESPERAR)"
+                color_hero = "gray"
+                estado_txt = "🛡️ PROTEGIENDO CAPITAL"
+            else:
+                accion_txt = "🟢 COMPRAR UP (SUBE)" if dir_actual == "UP" else "🔴 COMPRAR DOWN (BAJA)"
+                color_hero = "up" if dir_actual == "UP" else "down"
+                ganando_ahora = (dir_actual == "UP" and dif > 0) or (dir_actual == "DOWN" and dif < 0)
+                estado_txt = "🔥 GANANDO EN VIVO" if ganando_ahora else "⏳ EN DESARROLLO"
 
-        self.tendencia = "🚀 Subida Activa" if dif >= 0 else "📉 Bajada Activa"
+            self.prediccion_5m = {
+                "accion": accion_txt,
+                "color": color_hero,
+                "razon": razon_actual,
+                "confianza": conf_actual,
+                "precio_apertura": apertura_actual,
+                "dif_actual": dif,
+                "estado_actual": estado_txt,
+                "id_vela": ts_actual if dir_actual != "SKIP" else 0
+            }
 
-        # Cálculo de PnL real con $1 por trade (Ganancia +$0.88 / Pérdida -$1.00)
-        pnl_estricto = (self.w_est * self.pago_neto) - (self.l_est * self.monto_apuesta)
-        pnl_dinamico = (self.w_din * self.pago_neto) - (self.l_din * self.monto_apuesta)
+            self.tendencia = "🚀 Subida Activa" if dif >= 0 else "📉 Bajada Activa"
 
-        self.s_estricta = {
-            "titulo": f"🎯 Rentabilidad Señal Estricta ($1/trade): {'+' if pnl_estricto>=0 else ''}${pnl_estricto:.2f} USDT",
-            "desc": "Solo entra cuando un extremo de RSI tiene confirmación de mecha o giro.",
-            "confianza": f"W:{self.w_est} / L:{self.l_est}",
-            "color": "green" if pnl_estricto > 0 else ("red" if pnl_estricto < 0 else "gray")
-        }
+            pnl_estricto = (self.w_est * self.pago_neto) - (self.l_est * self.monto_apuesta)
+            pnl_dinamico = (self.w_din * self.pago_neto) - (self.l_din * self.monto_apuesta)
 
-        self.s_dinamica = {
-            "titulo": f"⚡ Rentabilidad Predict Filtrado ($1/trade): {'+' if pnl_dinamico>=0 else ''}${pnl_dinamico:.2f} USDT",
-            "desc": "Calculado descontando comisión de plataforma (Pago estimado 1.88x).",
-            "riesgo": f"W:{self.w_din} / L:{self.l_din}",
-            "color": "green" if pnl_dinamico > 0 else ("red" if pnl_dinamico < 0 else "gray")
-        }
+            self.s_estricta = {
+                "titulo": f"🎯 PnL Estricto ($1/trade): {'+' if pnl_estricto>=0 else ''}${pnl_estricto:.2f} USDT",
+                "desc": "Extremos con confirmación de mecha.",
+                "confianza": f"W:{self.w_est} / L:{self.l_est}",
+                "color": "green" if pnl_estricto > 0 else ("red" if pnl_estricto < 0 else "gray")
+            }
+
+            self.s_dinamica = {
+                "titulo": f"⚡ PnL Filtrado ($1/trade): {'+' if pnl_dinamico>=0 else ''}${pnl_dinamico:.2f} USDT",
+                "desc": "Predicciones de 5m con filtros inteligentes.",
+                "riesgo": f"W:{self.w_din} / L:{self.l_din}",
+                "color": "green" if pnl_dinamico > 0 else ("red" if pnl_dinamico < 0 else "gray")
+            }
+            print("Datos actualizados correctamente.")
+        except Exception as e:
+            print("ERROR EN LOOP DE MERCADO:", str(e))
 
 bot = ScalpingWebEngine()
 
 def loop_mercado():
     while True:
-        try:
-            bot.actualizar_datos()
-        except Exception as e:
-            print("Error actualizando:", e)
-        time.sleep(2)
+        bot.actualizar_datos()
+        time.sleep(3)
 
 HTML_UI = """
 <!DOCTYPE html>
@@ -277,17 +265,13 @@ HTML_UI = """
         * { box-sizing: border-box; font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; }
         body { background-color: #090b10; color: #f0f6fc; margin: 0; padding: 20px; display: flex; justify-content: center; }
         .main-panel { width: 100%; max-width: 1120px; background-color: #0f1218; border: 1px solid #21262d; border-radius: 14px; padding: 22px; box-shadow: 0 12px 35px rgba(0,0,0,0.8); }
-        
         .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1f242c; padding-bottom: 14px; margin-bottom: 18px; }
         .title { color: #f59e0b; font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
         .version-tag { background: #10b981; color: #000; font-size: 11px; padding: 2px 7px; border-radius: 5px; font-weight: 800; }
-        .header-controls { display: flex; align-items: center; gap: 10px; }
-        .btn-sound { background-color: #161a23; border: 1px solid #30363d; color: #e5e7eb; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
-        .btn-sound.active { border-color: #f59e0b; color: #f59e0b; background-color: rgba(245, 158, 11, 0.12); }
         .badge-online { background-color: rgba(16, 185, 129, 0.1); border: 1px solid #10b981; color: #10b981; padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
         .dot { width: 9px; height: 9px; background-color: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #10b981; }
 
-        .predict-hero { border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #30363d; background: #141821; transition: 0.3s; }
+        .predict-hero { border-radius: 12px; padding: 18px 22px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #30363d; background: #141821; }
         .predict-hero.up { border-color: #10b981; background: linear-gradient(90deg, rgba(16,185,129,0.16) 0%, rgba(20,24,33,0.95) 100%); }
         .predict-hero.down { border-color: #ef4444; background: linear-gradient(90deg, rgba(239,68,68,0.16) 0%, rgba(20,24,33,0.95) 100%); }
         .predict-hero.gray { border-color: #4b5563; background: #161a23; }
@@ -325,7 +309,6 @@ HTML_UI = """
         .wl-w { color: #10b981; }
         .wl-l { color: #ef4444; }
         .wr-badge { color: #f0f6fc; background: #212631; padding: 2px 7px; border-radius: 4px; margin-left: 5px; font-size: 12px; border: 1px solid #30363d; }
-        .btn-trash { background: #1f242d; border: 1px solid #30363d; color: #9ca3af; border-radius: 6px; padding: 4px 8px; cursor: pointer; margin-left: 8px; }
 
         table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
         th { background-color: #1b202b; color: #8b949e; font-weight: 600; text-align: left; padding: 8px 9px; border-radius: 4px; }
@@ -336,40 +319,34 @@ HTML_UI = """
 <body>
     <div class="main-panel">
         <div class="header">
-            <div class="title">
-                ⚡ BTC 5M - Scalping & Binance Predict Pro
-                <span class="version-tag">V3.0 SMART FILTER</span>
-            </div>
-            <div class="header-controls">
-                <button class="btn-sound" id="btn-audio" onclick="toggleAudio()">🔇 Activar Sonido</button>
-                <div class="badge-online"><span class="dot"></span> En línea (Filtro Activo)</div>
-            </div>
+            <div class="title">⚡ BTC 5M - Binance Predict Pro <span class="version-tag">V3.1 DEBUG</span></div>
+            <div class="badge-online"><span class="dot"></span> En línea</div>
         </div>
 
         <div class="predict-hero" id="hero-predict">
             <div>
-                <div class="predict-label">🎯 SEÑAL FILTRADA BINANCE PREDICT (EVITA RUIDO LATERAL)</div>
-                <div class="predict-action" id="pred-accion">SINCRONIZANDO...</div>
-                <div class="predict-reason" id="pred-razon">Evaluando mechas de rechazo y fuerza de tendencia...</div>
+                <div class="predict-label">🎯 SEÑAL FILTRADA BINANCE PREDICT</div>
+                <div class="predict-action" id="pred-accion">CARGANDO DATOS...</div>
+                <div class="predict-reason" id="pred-razon">Obteniendo velas desde Binance...</div>
             </div>
             <div class="predict-stats">
-                <div class="stat-line">Apertura Vela 5M: <b id="pred-apertura">$0.00</b></div>
-                <div class="stat-line">Diferencia Actual: <b id="pred-dif">$0.00</b></div>
-                <div class="live-status" id="pred-estado">⏳ Calculando...</div>
+                <div class="stat-line">Apertura: <b id="pred-apertura">$0.00</b></div>
+                <div class="stat-line">Diferencia: <b id="pred-dif">$0.00</b></div>
+                <div class="live-status" id="pred-estado">⏳ Conectando...</div>
             </div>
         </div>
 
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-label">Precio BTC (En Vivo)</div>
+                <div class="metric-label">Precio BTC</div>
                 <div class="metric-val" id="precio">$0.00</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">RSI (14) [Scalp]</div>
+                <div class="metric-label">RSI (14)</div>
                 <div class="metric-val" id="rsi">0.0</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Tendencia / Impulso</div>
+                <div class="metric-label">Tendencia</div>
                 <div class="metric-trend" id="tendencia">Cargando...</div>
             </div>
             <div class="metric-card">
@@ -380,89 +357,22 @@ HTML_UI = """
 
         <div class="signal-box gray" id="box-estricto">
             <div>
-                <div class="signal-title" id="est-titulo">Cargando PnL Estricto...</div>
-                <div class="signal-desc" id="est-desc">Simulación con entradas de $1.00 USD...</div>
+                <div class="signal-title" id="est-titulo">Cargando...</div>
+                <div class="signal-desc" id="est-desc">Esperando ciclo de red...</div>
             </div>
             <div class="pill" id="est-conf">W:0 / L:0</div>
         </div>
 
         <div class="signal-box gray" id="box-dinamico">
             <div>
-                <div class="signal-title" id="din-titulo">Cargando PnL Filtrado...</div>
-                <div class="signal-desc" id="din-desc">Simulación descontando comisión...</div>
+                <div class="signal-title" id="din-titulo">Cargando...</div>
+                <div class="signal-desc" id="din-desc">Esperando ciclo de red...</div>
             </div>
             <div class="pill" id="din-riesgo">W:0 / L:0</div>
-        </div>
-
-        <div class="history-grid">
-            <div class="history-card">
-                <div class="history-header">
-                    <span class="h-title-strict">🎯 Historial Estricto (Rechazo Confirmado)</span>
-                    <div>
-                        <span class="wl-counter">
-                            W: <span class="wl-w" id="w-est">0</span> | L: <span class="wl-l" id="l-est">0</span>
-                            <span class="wr-badge" id="wr-est">0%</span>
-                        </span>
-                        <button class="btn-trash" onclick="limpiar('estricto')">🗑️</button>
-                    </div>
-                </div>
-                <table>
-                    <thead><tr><th>Hora</th><th>Orden</th><th>Apertura</th><th>Filtro</th><th>Res.</th></tr></thead>
-                    <tbody id="tabla-estricta"></tbody>
-                </table>
-            </div>
-
-            <div class="history-card dynamic">
-                <div class="history-header">
-                    <span class="h-title-dyn">⚡ Historial Predict Filtrado (Sin Velas Basura)</span>
-                    <div>
-                        <span class="wl-counter">
-                            W: <span class="wl-w" id="w-din">0</span> | L: <span class="wl-l" id="l-din">0</span>
-                            <span class="wr-badge" id="wr-din">0%</span>
-                        </span>
-                        <button class="btn-trash" onclick="limpiar('dinamico')">🗑️</button>
-                    </div>
-                </div>
-                <table>
-                    <thead><tr><th>Hora</th><th>Orden 5M</th><th>Apertura</th><th>Cierre</th><th>Res.</th></tr></thead>
-                    <tbody id="tabla-dinamica"></tbody>
-                </table>
-            </div>
         </div>
     </div>
 
     <script>
-        let audioHabilitado = false;
-        let audioCtx = null;
-        let ultimaVelaSonada = 0;
-
-        function toggleAudio() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            audioHabilitado = !audioHabilitado;
-            const btn = document.getElementById('btn-audio');
-            if (audioHabilitado) {
-                btn.innerText = "🔊 Sonido Activo";
-                btn.classList.add('active');
-                sonarBeep(820, 0.15);
-            } else {
-                btn.innerText = "🔇 Activar Sonido";
-                btn.classList.remove('active');
-            }
-        }
-
-        function sonarBeep(freq, dur) {
-            if (!audioHabilitado || !audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + dur);
-        }
-
         function actualizarReloj() {
             const ahora = new Date();
             const segRestantes = 300 - ((ahora.getMinutes() % 5) * 60 + ahora.getSeconds());
@@ -492,69 +402,8 @@ HTML_UI = """
                 const signo = dif >= 0 ? '+' : '';
                 document.getElementById('pred-dif').innerText = `${signo}$${dif.toFixed(2)}`;
                 document.getElementById('pred-estado').innerText = data.prediccion_5m.estado_actual;
-
-                if (data.prediccion_5m.id_vela !== 0 && data.prediccion_5m.id_vela !== ultimaVelaSonada) {
-                    sonarBeep(920, 0.2);
-                    setTimeout(() => sonarBeep(1200, 0.25), 220);
-                    ultimaVelaSonada = data.prediccion_5m.id_vela;
-                }
-
-                document.getElementById('box-estricto').className = 'signal-box ' + data.s_estricta.color;
-                document.getElementById('est-titulo').innerText = data.s_estricta.titulo;
-                document.getElementById('est-desc').innerText = data.s_estricta.desc;
-                document.getElementById('est-conf').innerText = data.s_estricta.confianza;
-
-                document.getElementById('box-dinamico').className = 'signal-box ' + data.s_dinamica.color;
-                document.getElementById('din-titulo').innerText = data.s_dinamica.titulo;
-                document.getElementById('din-desc').innerText = data.s_dinamica.desc;
-                document.getElementById('din-riesgo').innerText = data.s_dinamica.riesgo;
-
-                document.getElementById('w-est').innerText = data.w_est;
-                document.getElementById('l-est').innerText = data.l_est;
-                const totEst = data.w_est + data.l_est;
-                document.getElementById('wr-est').innerText = totEst > 0 ? Math.round((data.w_est / totEst) * 100) + '% WinRate' : '0%';
-
-                document.getElementById('w-din').innerText = data.w_din;
-                document.getElementById('l-din').innerText = data.l_din;
-                const totDin = data.w_din + data.l_din;
-                document.getElementById('wr-din').innerText = totDin > 0 ? Math.round((data.w_din / totDin) * 100) + '% WinRate' : '0%';
-
-                const mostrarCurso = data.vela_en_curso && data.vela_en_curso.dir !== 'SKIP';
-                renderTabla('tabla-estricta', data.hist_estricto, (mostrarCurso && data.vela_en_curso.estricto) ? data.vela_en_curso : null);
-                renderTabla('tabla-dinamica', data.hist_dinamico, mostrarCurso ? data.vela_en_curso : null);
             } catch (e) { console.error(e); }
         }
-
-        function renderTabla(id, filas, enCurso) {
-            const tbody = document.getElementById(id);
-            let html = '';
-            if (enCurso) {
-                html += `
-                <tr class="pending-row">
-                    <td>${enCurso.hora}</td>
-                    <td><b>${enCurso.tipo}</b></td>
-                    <td>$${enCurso.entrada.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
-                    <td>En vivo...</td>
-                    <td>⏳ Activa</td>
-                </tr>`;
-            }
-            html += filas.map(f => `
-                <tr>
-                    <td>${f.hora}</td>
-                    <td><b>${f.tipo}</b></td>
-                    <td>${f.entrada}</td>
-                    <td>${f.extremo}</td>
-                    <td><b>${f.res}</b></td>
-                </tr>
-            `).join('');
-            tbody.innerHTML = html;
-        }
-
-        async function limpiar(tipo) {
-            await fetch('/api/clear/' + tipo, {method: 'POST'});
-            obtenerEstado();
-        }
-
         setInterval(obtenerEstado, 2000);
         obtenerEstado();
     </script>
@@ -577,33 +426,12 @@ def status():
         "prediccion_5m": bot.prediccion_5m,
         "s_estricta": bot.s_estricta,
         "s_dinamica": bot.s_dinamica,
-        "hist_estricto": bot.hist_estricto,
-        "hist_dinamico": bot.hist_dinamico,
-        "w_est": bot.w_est,
-        "l_est": bot.l_est,
-        "w_din": bot.w_din,
-        "l_din": bot.l_din,
         "vela_en_curso": bot.prediccion_vela_actual
     }))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return resp
 
-@app.route('/api/clear/<tipo>', methods=['POST'])
-def clear_history(tipo):
-    if tipo == 'estricto':
-        bot.hist_estricto = []
-        bot.w_est = 0
-        bot.l_est = 0
-    elif tipo == 'dinamico':
-        bot.hist_dinamico = []
-        bot.w_din = 0
-        bot.l_din = 0
-    return jsonify({"ok": True})
-
 if __name__ == '__main__':
     hilo = threading.Thread(target=loop_mercado, daemon=True)
     hilo.start()
-    print("\n" + "="*60)
-    print("🚀 PANEL V3.0 SMART FILTER ACTIVO -> http://127.0.0.1:5000")
-    print("="*60 + "\n")
     app.run(host='127.0.0.1', port=5000, debug=False)

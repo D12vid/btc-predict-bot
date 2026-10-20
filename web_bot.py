@@ -147,7 +147,6 @@ class ScalpingWebEngine:
 
     def actualizar_datos(self):
         try:
-            print("Descargando velas de Binance...")
             velas = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=75)
             df = pd.DataFrame(velas, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
             df = self.calcular_indicadores(df)
@@ -244,9 +243,8 @@ class ScalpingWebEngine:
                 "riesgo": f"W:{self.w_din} / L:{self.l_din}",
                 "color": "green" if pnl_dinamico > 0 else ("red" if pnl_dinamico < 0 else "gray")
             }
-            print("Datos actualizados correctamente.")
         except Exception as e:
-            print("ERROR EN LOOP DE MERCADO:", str(e))
+            print("ERROR EN LOOP:", str(e))
 
 bot = ScalpingWebEngine()
 
@@ -254,6 +252,10 @@ def loop_mercado():
     while True:
         bot.actualizar_datos()
         time.sleep(3)
+
+# ⚠️ INICIAR EL HILO AQUÍ FUERA PARA QUE GUNICORN LO EJECUTE EN LA NUBE ⚠️
+hilo = threading.Thread(target=loop_mercado, daemon=True)
+hilo.start()
 
 HTML_UI = """
 <!DOCTYPE html>
@@ -298,36 +300,20 @@ HTML_UI = """
         .signal-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
         .signal-desc { color: #9ca3af; font-size: 13px; }
         .pill { background-color: #212631; color: #d1d5db; padding: 6px 12px; border-radius: 7px; font-size: 12px; font-weight: 600; border: 1px solid #30363d; }
-
-        .history-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
-        .history-card { background-color: #13171f; border-radius: 10px; padding: 15px; border-top: 3px solid #10b981; border: 1px solid #21262d; border-top-width: 3px; }
-        .history-card.dynamic { border-top-color: #f59e0b; }
-        .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-        .h-title-strict { color: #10b981; font-weight: 700; font-size: 15px; }
-        .h-title-dyn { color: #f59e0b; font-weight: 700; font-size: 15px; }
-        .wl-counter { font-size: 13px; font-weight: 700; color: #8b949e; }
-        .wl-w { color: #10b981; }
-        .wl-l { color: #ef4444; }
-        .wr-badge { color: #f0f6fc; background: #212631; padding: 2px 7px; border-radius: 4px; margin-left: 5px; font-size: 12px; border: 1px solid #30363d; }
-
-        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-        th { background-color: #1b202b; color: #8b949e; font-weight: 600; text-align: left; padding: 8px 9px; border-radius: 4px; }
-        td { padding: 8px 9px; border-bottom: 1px solid #1f242c; color: #e5e7eb; }
-        .pending-row { background-color: rgba(245, 158, 11, 0.12); color: #fbbf24; font-weight: 700; }
     </style>
 </head>
 <body>
     <div class="main-panel">
         <div class="header">
-            <div class="title">⚡ BTC 5M - Binance Predict Pro <span class="version-tag">V3.1 DEBUG</span></div>
+            <div class="title">⚡ BTC 5M - Binance Predict Pro <span class="version-tag">V3.2 CLOUD FIX</span></div>
             <div class="badge-online"><span class="dot"></span> En línea</div>
         </div>
 
         <div class="predict-hero" id="hero-predict">
             <div>
                 <div class="predict-label">🎯 SEÑAL FILTRADA BINANCE PREDICT</div>
-                <div class="predict-action" id="pred-accion">CARGANDO DATOS...</div>
-                <div class="predict-reason" id="pred-razon">Obteniendo velas desde Binance...</div>
+                <div class="predict-action" id="pred-accion">CARGANDO...</div>
+                <div class="predict-reason" id="pred-razon">Conectando con Binance...</div>
             </div>
             <div class="predict-stats">
                 <div class="stat-line">Apertura: <b id="pred-apertura">$0.00</b></div>
@@ -358,7 +344,7 @@ HTML_UI = """
         <div class="signal-box gray" id="box-estricto">
             <div>
                 <div class="signal-title" id="est-titulo">Cargando...</div>
-                <div class="signal-desc" id="est-desc">Esperando ciclo de red...</div>
+                <div class="signal-desc" id="est-desc">Esperando datos...</div>
             </div>
             <div class="pill" id="est-conf">W:0 / L:0</div>
         </div>
@@ -366,7 +352,7 @@ HTML_UI = """
         <div class="signal-box gray" id="box-dinamico">
             <div>
                 <div class="signal-title" id="din-titulo">Cargando...</div>
-                <div class="signal-desc" id="din-desc">Esperando ciclo de red...</div>
+                <div class="signal-desc" id="din-desc">Esperando datos...</div>
             </div>
             <div class="pill" id="din-riesgo">W:0 / L:0</div>
         </div>
@@ -402,6 +388,16 @@ HTML_UI = """
                 const signo = dif >= 0 ? '+' : '';
                 document.getElementById('pred-dif').innerText = `${signo}$${dif.toFixed(2)}`;
                 document.getElementById('pred-estado').innerText = data.prediccion_5m.estado_actual;
+
+                document.getElementById('box-estricto').className = 'signal-box ' + data.s_estricta.color;
+                document.getElementById('est-titulo').innerText = data.s_estricta.titulo;
+                document.getElementById('est-desc').innerText = data.s_estricta.desc;
+                document.getElementById('est-conf').innerText = data.s_estricta.confianza;
+
+                document.getElementById('box-dinamico').className = 'signal-box ' + data.s_dinamico.color;
+                document.getElementById('din-titulo').innerText = data.s_dinamico.titulo;
+                document.getElementById('din-desc').innerText = data.s_dinamico.desc;
+                document.getElementById('din-riesgo').innerText = data.s_dinamico.riesgo;
             } catch (e) { console.error(e); }
         }
         setInterval(obtenerEstado, 2000);
@@ -432,6 +428,4 @@ def status():
     return resp
 
 if __name__ == '__main__':
-    hilo = threading.Thread(target=loop_mercado, daemon=True)
-    hilo.start()
     app.run(host='127.0.0.1', port=5000, debug=False)

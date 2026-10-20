@@ -548,12 +548,3 @@ def clear_history(tipo):
         bot.w_din = 0
         bot.l_din = 0
     return jsonify({"ok": True})
-
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=False)
-    }))
-    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    return resp
-
-if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=False)

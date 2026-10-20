@@ -1,7 +1,7 @@
-import ccxt
-import pandas as pd
 import time
 import threading
+import requests
+import pandas as pd
 from datetime import datetime
 from flask import Flask, jsonify, render_template_string, make_response
 
@@ -9,21 +9,18 @@ app = Flask(__name__)
 
 class ScalpingWebEngine:
     def __init__(self):
-        self.exchange = ccxt.binance({'enableRateLimit': True})
-        self.symbol = 'BTC/USDT'
-        self.timeframe = '5m'
-        
+        self.symbol = 'BTCUSDT'
         self.monto_apuesta = 1.0
         self.pago_neto = 0.88 
         
         self.precio = 0.0
         self.rsi = 50.0
-        self.tendencia = "⏳ Sincronizando..."
+        self.tendencia = "⏳ Sincronizando con la nube..."
         
         self.prediccion_5m = {
             "accion": "ESPERANDO...",
             "color": "gray",
-            "razon": "Conectando con Binance en la nube...",
+            "razon": "Obteniendo datos de mercado...",
             "confianza": "50%",
             "precio_apertura": 0.0,
             "dif_actual": 0.0,
@@ -33,13 +30,13 @@ class ScalpingWebEngine:
 
         self.s_estricta = {
             "titulo": "Análisis Estricto: Esperando Datos",
-            "desc": "Estableciendo conexión con el servidor...",
+            "desc": "Conectando mediante pasarela HTTP...",
             "confianza": "Filtro Activo",
             "color": "gray"
         }
         self.s_dinamica = {
             "titulo": "⚡ Filtro de Volatilidad y PnL",
-            "desc": "Esperando primer ciclo de velas...",
+            "desc": "Esperando primer ciclo...",
             "riesgo": "PnL: $0.00",
             "color": "gray"
         }
@@ -54,6 +51,24 @@ class ScalpingWebEngine:
         self.vela_actual_ts = None
         self.prediccion_vela_actual = None
         self.backtest_completado = False
+
+    def obtener_velas_binance(self):
+        """Obtiene velas de 5m usando una API pública alternativa sin bloqueos de IP."""
+        try:
+            url = f"https://api.binance.com/api/v3/klines?symbol={self.symbol}&interval=5m&limit=75"
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                df = pd.DataFrame(data, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'close_time', 'qav', 'num_trades', 'taker_base', 'taker_quote', 'ignore'])
+                df['open'] = df['open'].astype(float)
+                df['high'] = df['high'].astype(float)
+                df['low'] = df['low'].astype(float)
+                df['close'] = df['close'].astype(float)
+                df['vol'] = df['vol'].astype(float)
+                return df
+        except Exception as e:
+            print("Error HTTP Binance:", e)
+        return None
 
     def calcular_indicadores(self, df):
         delta = df['close'].diff()
@@ -146,9 +161,8 @@ class ScalpingWebEngine:
         self.backtest_completado = True
 
     def actualizar_datos(self):
-        try:
-            velas = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=75)
-            df = pd.DataFrame(velas, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+        df = self.obtener_velas_binance()
+        if df is not None and not df.empty:
             df = self.calcular_indicadores(df)
             
             if not self.backtest_completado:
@@ -243,8 +257,6 @@ class ScalpingWebEngine:
                 "riesgo": f"W:{self.w_din} / L:{self.l_din}",
                 "color": "green" if pnl_dinamico > 0 else ("red" if pnl_dinamico < 0 else "gray")
             }
-        except Exception as e:
-            print("ERROR EN LOOP:", str(e))
 
 bot = ScalpingWebEngine()
 
@@ -253,7 +265,6 @@ def loop_mercado():
         bot.actualizar_datos()
         time.sleep(3)
 
-# ⚠️ INICIAR EL HILO AQUÍ FUERA PARA QUE GUNICORN LO EJECUTE EN LA NUBE ⚠️
 hilo = threading.Thread(target=loop_mercado, daemon=True)
 hilo.start()
 
@@ -262,7 +273,7 @@ HTML_UI = """
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>BTC 5M - Binance Predict Pro V3</title>
+    <title>BTC 5M - Binance Predict Pro V3.3</title>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Roboto, Helvetica, sans-serif; }
         body { background-color: #090b10; color: #f0f6fc; margin: 0; padding: 20px; display: flex; justify-content: center; }
@@ -300,12 +311,29 @@ HTML_UI = """
         .signal-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
         .signal-desc { color: #9ca3af; font-size: 13px; }
         .pill { background-color: #212631; color: #d1d5db; padding: 6px 12px; border-radius: 7px; font-size: 12px; font-weight: 600; border: 1px solid #30363d; }
+
+        .history-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+        .history-card { background-color: #13171f; border-radius: 10px; padding: 15px; border-top: 3px solid #10b981; border: 1px solid #21262d; border-top-width: 3px; }
+        .history-card.dynamic { border-top-color: #f59e0b; }
+        .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .h-title-strict { color: #10b981; font-weight: 700; font-size: 15px; }
+        .h-title-dyn { color: #f59e0b; font-weight: 700; font-size: 15px; }
+        .wl-counter { font-size: 13px; font-weight: 700; color: #8b949e; }
+        .wl-w { color: #10b981; }
+        .wl-l { color: #ef4444; }
+        .wr-badge { color: #f0f6fc; background: #212631; padding: 2px 7px; border-radius: 4px; margin-left: 5px; font-size: 12px; border: 1px solid #30363d; }
+        .btn-trash { background: #1f242d; border: 1px solid #30363d; color: #9ca3af; border-radius: 6px; padding: 4px 8px; cursor: pointer; margin-left: 8px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        th { background-color: #1b202b; color: #8b949e; font-weight: 600; text-align: left; padding: 8px 9px; border-radius: 4px; }
+        td { padding: 8px 9px; border-bottom: 1px solid #1f242c; color: #e5e7eb; }
+        .pending-row { background-color: rgba(245, 158, 11, 0.12); color: #fbbf24; font-weight: 700; }
     </style>
 </head>
 <body>
     <div class="main-panel">
         <div class="header">
-            <div class="title">⚡ BTC 5M - Binance Predict Pro <span class="version-tag">V3.2 CLOUD FIX</span></div>
+            <div class="title">⚡ BTC 5M - Binance Predict Pro <span class="version-tag">V3.3 CLOUD HTTP</span></div>
             <div class="badge-online"><span class="dot"></span> En línea</div>
         </div>
 
@@ -313,7 +341,7 @@ HTML_UI = """
             <div>
                 <div class="predict-label">🎯 SEÑAL FILTRADA BINANCE PREDICT</div>
                 <div class="predict-action" id="pred-accion">CARGANDO...</div>
-                <div class="predict-reason" id="pred-razon">Conectando con Binance...</div>
+                <div class="predict-reason" id="pred-razon">Conectando vía HTTP...</div>
             </div>
             <div class="predict-stats">
                 <div class="stat-line">Apertura: <b id="pred-apertura">$0.00</b></div>
@@ -356,6 +384,36 @@ HTML_UI = """
             </div>
             <div class="pill" id="din-riesgo">W:0 / L:0</div>
         </div>
+
+        <div class="history-grid">
+            <div class="history-card">
+                <div class="history-header">
+                    <span class="h-title-strict">🎯 Historial Estricto</span>
+                    <div>
+                        <span class="wl-counter">W: <span class="wl-w" id="w-est">0</span> | L: <span class="wl-l" id="l-est">0</span> <span class="wr-badge" id="wr-est">0%</span></span>
+                        <button class="btn-trash" onclick="limpiar('estricto')">🗑️</button>
+                    </div>
+                </div>
+                <table>
+                    <thead><tr><th>Hora</th><th>Orden</th><th>Apertura</th><th>Filtro</th><th>Res.</th></tr></thead>
+                    <tbody id="tabla-estricta"></tbody>
+                </table>
+            </div>
+
+            <div class="history-card dynamic">
+                <div class="history-header">
+                    <span class="h-title-dyn">⚡ Historial Predict Filtrado</span>
+                    <div>
+                        <span class="wl-counter">W: <span class="wl-w" id="w-din">0</span> | L: <span class="wl-l" id="l-din">0</span> <span class="wr-badge" id="wr-din">0%</span></span>
+                        <button class="btn-trash" onclick="limpiar('dinamico')">🗑️</button>
+                    </div>
+                </div>
+                <table>
+                    <thead><tr><th>Hora</th><th>Orden 5M</th><th>Apertura</th><th>Cierre</th><th>Res.</th></tr></thead>
+                    <tbody id="tabla-dinamica"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -394,12 +452,58 @@ HTML_UI = """
                 document.getElementById('est-desc').innerText = data.s_estricta.desc;
                 document.getElementById('est-conf').innerText = data.s_estricta.confianza;
 
-                document.getElementById('box-dinamico').className = 'signal-box ' + data.s_dinamico.color;
-                document.getElementById('din-titulo').innerText = data.s_dinamico.titulo;
-                document.getElementById('din-desc').innerText = data.s_dinamico.desc;
-                document.getElementById('din-riesgo').innerText = data.s_dinamico.riesgo;
+                document.getElementById('box-dinamico').className = 'signal-box ' + data.s_dinamica.color;
+                document.getElementById('din-titulo').innerText = data.s_dinamica.titulo;
+                document.getElementById('din-desc').innerText = data.s_dinamica.desc;
+                document.getElementById('din-riesgo').innerText = data.s_dinamica.riesgo;
+
+                document.getElementById('w-est').innerText = data.w_est;
+                document.getElementById('l-est').innerText = data.l_est;
+                const totEst = data.w_est + data.l_est;
+                document.getElementById('wr-est').innerText = totEst > 0 ? Math.round((data.w_est / totEst) * 100) + '%' : '0%';
+
+                document.getElementById('w-din').innerText = data.w_din;
+                document.getElementById('l-din').innerText = data.l_din;
+                const totDin = data.w_din + data.l_din;
+                document.getElementById('wr-din').innerText = totDin > 0 ? Math.round((data.w_din / totDin) * 100) + '%' : '0%';
+
+                renderTabla('tabla-estricta', data.hist_estricto, (data.vela_en_curso && data.vela_en_curso.estricto) ? data.vela_en_curso : null);
+                renderTabla('tabla-dinamica', data.hist_dinamico, data.vela_en_curso);
             } catch (e) { console.error(e); }
         }
+
+        function renderTabla(id, filas, enCurso) {
+            const tbody = document.getElementById(id);
+            let html = '';
+            if (enCurso && enCurso.dir !== 'SKIP') {
+                html += `
+                <tr class="pending-row">
+                    <td>${enCurso.hora}</td>
+                    <td><b>${enCurso.tipo}</b></td>
+                    <td>$${enCurso.entrada.toLocaleString('en-US', {minimumFractionDigits: 2})}</td>
+                    <td>En vivo...</td>
+                    <td>⏳ Activa</td>
+                </tr>`;
+            }
+            if(filas) {
+                html += filas.map(f => `
+                    <tr>
+                        <td>${f.hora}</td>
+                        <td><b>${f.tipo}</b></td>
+                        <td>${f.entrada}</td>
+                        <td>${f.extremo}</td>
+                        <td><b>${f.res}</b></td>
+                    </tr>
+                `).join('');
+            }
+            tbody.innerHTML = html;
+        }
+
+        async function limpiar(tipo) {
+            await fetch('/api/clear/' + tipo, {method: 'POST'});
+            obtenerEstado();
+        }
+
         setInterval(obtenerEstado, 2000);
         obtenerEstado();
     </script>
@@ -422,7 +526,31 @@ def status():
         "prediccion_5m": bot.prediccion_5m,
         "s_estricta": bot.s_estricta,
         "s_dinamica": bot.s_dinamica,
+        "hist_estricto": bot.hist_estricto,
+        "hist_dinamico": bot.hist_dinamico,
+        "w_est": bot.w_est,
+        "l_est": bot.l_est,
+        "w_din": bot.w_din,
+        "l_din": bot.l_din,
         "vela_en_curso": bot.prediccion_vela_actual
+    }))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return resp
+
+@app.route('/api/clear/<tipo>', methods=['POST'])
+def clear_history(tipo):
+    if tipo == 'estricto':
+        bot.hist_estricto = []
+        bot.w_est = 0
+        bot.l_est = 0
+    elif tipo == 'dinamico':
+        bot.hist_dinamico = []
+        bot.w_din = 0
+        bot.l_din = 0
+    return jsonify({"ok": True})
+
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=5000, debug=False)
     }))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return resp
